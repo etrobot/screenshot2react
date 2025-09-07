@@ -11,6 +11,15 @@ import mimetypes
 
 
 def convert_css_to_tailwind(css):
+    """
+    Convert CSS styles to Tailwind CSS classes using the convert_css.js script.
+    
+    Args:
+        css (str): CSS style string to convert
+        
+    Returns:
+        str: Space-separated Tailwind CSS classes, or empty string if conversion fails
+    """
     process = subprocess.Popen(
         ['node', 'convert_css.js'],
         stdin=subprocess.PIPE,
@@ -22,6 +31,8 @@ def convert_css_to_tailwind(css):
     if process.returncode != 0:
         print(f"Error converting CSS: {stderr}")
         return ""
+    
+    # Strip whitespace and return the converted classes
     return stdout.strip()
 
 
