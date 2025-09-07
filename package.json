@@ -1,0 +1,5 @@
+{
+  "dependencies": {
+    "css-to-tailwindcss": "^1.0.5"
+  }
+}
