@@ -310,3 +310,5 @@ cython_debug/
 *.jpg
 *.svg
 # *.csv
+
+processed_screenshots
