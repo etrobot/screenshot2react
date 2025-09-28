@@ -409,6 +409,16 @@ def capture_website_content(url, output_path, record_video=True, element_removal
             print("Removing unwanted DOM elements...")
             remove_unwanted_elements(page, element_removal_options)
             
+            # Extract webpage text content for video analysis
+            try:
+                from process_screenshots import extract_webpage_text
+                extracted_text = extract_webpage_text(page)
+                if extracted_text and element_removal_options is not None:
+                    element_removal_options['extracted_text'] = extracted_text
+                    print("✅ 页面文本已提取并准备用于视频分析")
+            except Exception as e:
+                print(f"⚠️  文本提取过程中出现错误: {e}")
+            
             # Take the screenshot without video recording (already done)
             print("Taking full page screenshot...")
             screenshot_success = take_full_page_screenshot_sync(page, output_path, record_video=False)

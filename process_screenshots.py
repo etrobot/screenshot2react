@@ -23,6 +23,61 @@ def color_text(text, color_code):
     return f"{color_code}{text}{Colors.END}"
 
 
+def extract_webpage_text(page):
+    """
+    Extract text content from webpage using the external extract_text.js file.
+    
+    Args:
+        page: Playwright page object
+        
+    Returns:
+        str: Extracted text content formatted for analysis
+    """
+    try:
+        print("📊 开始提取页面文本...")
+        
+        # Read the external JavaScript file
+        js_file_path = os.path.join(os.path.dirname(__file__), 'extract_text.js')
+        
+        if not os.path.exists(js_file_path):
+            print(f"❌ 未找到文本提取JS文件: {js_file_path}")
+            return ""
+        
+        with open(js_file_path, 'r', encoding='utf-8') as f:
+            js_content = f.read()
+        
+        # Inject the JavaScript file into the page
+        page.evaluate(js_content)
+        
+        # Execute the text extraction function
+        extracted_text = page.evaluate("""
+            () => {
+                if (typeof extractAndCopyText === 'function') {
+                    // Use the function from extract_text.js, but return instead of copying
+                    const extractor = new TextExtractor({
+                        includeHidden: false,
+                        minTextLength: 1,
+                        maxDepth: 10
+                    });
+                    return extractor.extractIndentedText();
+                } else {
+                    return 'Text extraction function not found';
+                }
+            }
+        """)
+        
+        if extracted_text and extracted_text != 'No content found' and extracted_text != 'Text extraction function not found':
+            print(f"✅ 成功提取页面文本 ({len(extracted_text)} 字符)")
+            return extracted_text
+        else:
+            print("⚠️  未能提取页面文本")
+            return ""
+            
+    except Exception as e:
+        print(f"❌ 页面文本提取失败: {str(e)}")
+        return ""
+
+
 def convert_css_to_tailwind(css: str) -> str:
     """
     Convert CSS styles to Tailwind CSS classes using the convert_css.js script.
@@ -44,6 +99,79 @@ def convert_css_to_tailwind(css: str) -> str:
     except Exception as e:
         print(f"convert_css_to_tailwind error: {e}")
         return ""
+
+
+def analyze_video_using_external_tool(video_path: str, prompt: str = None, output_dir: str = None) -> dict:
+    """
+    使用独立的 video_analysis.py 工具分析视频
+    
+    Args:
+        video_path (str): 视频文件路径
+        prompt (str): 分析提示词，如果为 None 使用默认值
+        output_dir (str): 输出目录，如果为 None 则在视频文件同目录
+    
+    Returns:
+        dict: 包含 'success', 'output_file', 'error' 的分析结果
+    """
+    try:
+        # 构建命令行参数
+        cmd = ['python3', 'video_analysis.py', video_path]
+        
+        # 添加自定义提示词
+        if prompt:
+            cmd.extend(['-p', prompt])
+        
+        # 添加输出路径和格式
+        if output_dir:
+            video_name = os.path.splitext(os.path.basename(video_path))[0]
+            output_file = os.path.join(output_dir, f"{video_name}_analysis.md")
+            cmd.extend(['-o', output_file])
+        
+        # 设置为 Markdown 格式
+        cmd.extend(['--format', 'markdown'])
+        
+        print(f"🎬 启动视频分析: {os.path.basename(video_path)}")
+        
+        # 执行视频分析工具
+        result = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5分钟超时
+        )
+        
+        if result.returncode == 0:
+            print("✅ 视频分析完成")
+            return {
+                'success': True,
+                'output_file': output_file if output_dir else f"{os.path.splitext(video_path)[0]}_analysis.md",
+                'error': None
+            }
+        else:
+            error_msg = f"视频分析失败: {result.stderr or result.stdout}"
+            print(f"❌ {error_msg}")
+            return {
+                'success': False,
+                'output_file': None,
+                'error': error_msg
+            }
+            
+    except subprocess.TimeoutExpired:
+        error_msg = "视频分析超时 (5分钟)"
+        print(f"❌ {error_msg}")
+        return {
+            'success': False,
+            'output_file': None,
+            'error': error_msg
+        }
+    except Exception as e:
+        error_msg = f"视频分析工具调用错误: {str(e)}"
+        print(f"❌ {error_msg}")
+        return {
+            'success': False,
+            'output_file': None,
+            'error': error_msg
+        }
 
 
 def get_user_preferences():
@@ -217,6 +345,63 @@ def process_url(url, base_output_dir, record_video=True, element_removal_options
         success = capture_website_content(url, screenshot_path, record_video=record_video, element_removal_options=element_removal_options)
         if success:
             print(f"✓ Successfully processed {url}")
+            
+            # If video recording was enabled and video analysis is requested, try to analyze the video with Gemini
+            should_analyze = (record_video and 
+                            element_removal_options and 
+                            element_removal_options.get('analyze_video', False) and 
+                            os.environ.get('GEMINI_API_KEY'))
+            
+            if should_analyze:
+                # Look for video files in the website output directory
+                video_files = []
+                for ext in ['.mp4', '.webm', '.avi']:
+                    video_files.extend(Path(website_output_dir).glob(f'*{ext}'))
+                
+                if video_files:
+                    # Analyze the first video file found
+                    video_file = video_files[0]
+                    print(f"🎬 找到视频文件: {video_file}")
+                    
+                    # Get custom prompt or use default
+                    base_video_prompt = (element_removal_options.get('video_prompt') if element_removal_options 
+                                       else "请详细分析这个网站滚动视频，包括：1) 主要内容和布局总结，2) 关键视觉元素和设计模式，3) 用户体验观察。")
+                    
+                    # Check if we have extracted webpage text to include in the prompt
+                    webpage_text = element_removal_options.get('extracted_text', '') if element_removal_options else ''
+                    
+                    if webpage_text:
+                        print("📄 将网页文本内容加入视频分析提示词")
+                        enhanced_prompt = f"""{base_video_prompt}
+
+以下是从网页中提取的文本内容，请结合此文本信息和视频内容进行分析：
+
+{webpage_text}
+
+请在分析视频时参考上述文本内容，特别关注：
+- 视频中展示的内容与文本内容的对应关系
+- 视觉设计如何支持和呈现文本信息
+- 用户界面布局与文本层次结构的关系
+- 整体用户体验的连贯性"""
+                        video_prompt = enhanced_prompt
+                    else:
+                        video_prompt = base_video_prompt
+                    
+                    # Use external video analysis tool
+                    analysis_result = analyze_video_using_external_tool(
+                        str(video_file), 
+                        prompt=video_prompt,
+                        output_dir=website_output_dir
+                    )
+                    
+                    if analysis_result['success']:
+                        print(f"✅ 视频分析已保存到: {analysis_result['output_file']}")
+                    else:
+                        print(f"❌ 视频分析失败: {analysis_result['error']}")
+                else:
+                    print("⚠️  未找到视频文件，跳过视频分析")
+            elif record_video and element_removal_options and element_removal_options.get('analyze_video', False) and not os.environ.get('GEMINI_API_KEY'):
+                print("⚠️  GEMINI_API_KEY 未设置，跳过视频分析")
         else:
             print(f"✗ Failed to process {url}")
         return success
@@ -260,6 +445,10 @@ Interactive mode (-i) allows you to choose which elements to remove during proce
                        help='Page load timeout in seconds (default: %(default)s)')
     parser.add_argument('--delay', type=float, default=2.0,
                        help='Delay after page load before screenshot (default: %(default)s)')
+    parser.add_argument('--analyze-video', action='store_true',
+                       help='Enable video analysis with Gemini API (requires GEMINI_API_KEY)')
+    parser.add_argument('--video-prompt', default="请详细分析这个网站滚动视频，包括：1) 主要内容和布局总结，2) 关键视觉元素和设计模式，3) 用户体验观察。",
+                       help='视频分析的自定义提示词 (默认: 综合分析)')
     
     # Check if no arguments provided - enter full interactive mode
     if len(sys.argv) == 1:
@@ -310,7 +499,9 @@ Interactive mode (-i) allows you to choose which elements to remove during proce
             'remove_custom': False,
             'custom_selectors': [],
             'timeout': args.timeout,
-            'delay': args.delay
+            'delay': args.delay,
+            'analyze_video': args.analyze_video,
+            'video_prompt': args.video_prompt
         }
         
         # Handle element removal options
@@ -381,6 +572,16 @@ Interactive mode (-i) allows you to choose which elements to remove during proce
             print(f"  ✅ Custom selectors: {', '.join(element_removal_options['custom_selectors'])}")
         else:
             print("  ❌ Custom selectors")
+        
+        # Display video analysis status
+        print("🎬 Video analysis:")
+        if element_removal_options.get('analyze_video', False):
+            if os.environ.get('GEMINI_API_KEY'):
+                print("  ✅ Video analysis enabled (Gemini API)")
+            else:
+                print("  ⚠️  Video analysis requested but GEMINI_API_KEY not set")
+        else:
+            print("  ❌ Video analysis disabled")
         print()
     else:
         # Simplified display for full interactive mode
