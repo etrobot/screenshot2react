@@ -354,19 +354,16 @@ def capture_website_content(url, output_path, record_video=True, element_removal
     """
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=True,  # Use headless mode for better performance
+            headless=True,  # Use headless mode for better performance and stability
             args=[
                 '--no-sandbox',
                 '--disable-dev-shm-usage',
-                '--disable-gpu',
-                '--disable-software-rasterizer',
                 '--disable-background-timer-throttling',
                 '--disable-backgrounding-occluded-windows',
                 '--disable-renderer-backgrounding',
                 '--proxy-server=http://127.0.0.1:7890',  # Use proxy for network access
-                '--window-size=1280,960',  # Set window size for headless mode
                 '--disable-web-security',  # Better compatibility
-                '--disable-features=VizDisplayCompositor'  # Better headless rendering
+                '--window-size=1280,960'  # Set consistent window size
             ]
         )
         page = browser.new_page()
@@ -376,7 +373,7 @@ def capture_website_content(url, output_path, record_video=True, element_removal
             timeout_ms = (element_removal_options.get('timeout', 30) * 1000) if element_removal_options else 30000
             page.set_default_timeout(timeout_ms)
             
-            # Set viewport to 1280x960 (4:3 aspect ratio)
+            # Set viewport to 1280x960 (4:3 aspect ratio, consistent with window size)
             page.set_viewport_size({"width": 1280, "height": 960})
             
             # Navigate to the URL with configurable timeout

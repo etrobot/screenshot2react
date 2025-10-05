@@ -117,15 +117,17 @@ def analyze_video_using_external_tool(video_path: str, prompt: str = None, outpu
         # 构建命令行参数
         cmd = ['python3', 'video_analysis.py', video_path]
         
-        # 添加自定义提示词
-        if prompt:
+        # 添加自定义提示词（如果为 None 则让 video_analysis.py 使用默认提示词）
+        if prompt is not None:
             cmd.extend(['-p', prompt])
         
         # 添加输出路径和格式
+        video_name = os.path.splitext(os.path.basename(video_path))[0]
         if output_dir:
-            video_name = os.path.splitext(os.path.basename(video_path))[0]
             output_file = os.path.join(output_dir, f"{video_name}_analysis.md")
             cmd.extend(['-o', output_file])
+        else:
+            output_file = f"{os.path.splitext(video_path)[0]}_analysis.md"
         
         # 设置为 Markdown 格式
         cmd.extend(['--format', 'markdown'])
@@ -144,7 +146,7 @@ def analyze_video_using_external_tool(video_path: str, prompt: str = None, outpu
             print("✅ 视频分析完成")
             return {
                 'success': True,
-                'output_file': output_file if output_dir else f"{os.path.splitext(video_path)[0]}_analysis.md",
+                'output_file': output_file,
                 'error': None
             }
         else:
@@ -257,35 +259,66 @@ def get_interactive_input():
     print(color_text("🎮 完全交互模式", Colors.MAGENTA + Colors.BOLD))
     print("="*60)
     
-    # Simple single URL input for now
-    print(color_text("\n🌐 请输入要处理的网站URL:", Colors.CYAN))
+    # Accept both URLs and file paths
+    print(color_text("\n🌐 请输入要处理的内容:", Colors.CYAN))
+    print(color_text("   • 单个URL (以 http:// 或 https:// 开头)", Colors.BLUE))
+    print(color_text("   • 文件路径 (包含多个URL的 .txt 文件)", Colors.BLUE))
+    print(color_text("   • 输入 'q' 退出程序", Colors.BLUE))
     
     while True:
-        url = input(color_text("🔗 URL: ", Colors.BLUE)).strip()
+        user_input = input(color_text("\n🔗 URL 或文件路径: ", Colors.BLUE)).strip()
         
-        if not url:
-            print(color_text("⚠️  请输入URL", Colors.YELLOW))
+        if not user_input:
+            print(color_text("⚠️  请输入URL或文件路径", Colors.YELLOW))
             continue
             
-        if url.lower() == 'q':
+        if user_input.lower() == 'q':
             print(color_text("👋 退出程序", Colors.MAGENTA))
             sys.exit(0)
-            
-        if url.startswith(('http://', 'https://')):
+        
+        # Check if it's a URL
+        if user_input.startswith(('http://', 'https://')):
+            urls = [user_input]
+            print(color_text(f"✅ 将处理单个URL: {user_input}", Colors.GREEN))
             break
+        # Check if it's a file path
+        elif os.path.exists(user_input):
+            try:
+                with open(user_input, 'r', encoding='utf-8') as f:
+                    urls = [line.strip() for line in f if line.strip()]
+                
+                # Validate that all lines are URLs
+                valid_urls = []
+                for url in urls:
+                    if url.startswith(('http://', 'https://')):
+                        valid_urls.append(url)
+                    else:
+                        print(color_text(f"⚠️  跳过无效URL: {url}", Colors.YELLOW))
+                
+                if valid_urls:
+                    urls = valid_urls
+                    print(color_text(f"✅ 从文件 {user_input} 读取到 {len(urls)} 个有效URL", Colors.GREEN))
+                    break
+                else:
+                    print(color_text(f"❌ 文件 {user_input} 中没有找到有效的URL", Colors.RED))
+                    continue
+                    
+            except Exception as e:
+                print(color_text(f"❌ 无法读取文件 {user_input}: {e}", Colors.RED))
+                continue
         else:
-            print(color_text("❌ 请输入有效的URL（以 http:// 或 https:// 开头）", Colors.RED))
+            print(color_text("❌ 请输入有效的URL（以 http:// 或 https:// 开头）或现有的文件路径", Colors.RED))
+            continue
     
     # Simple defaults
     output_dir = "processed_screenshots"
     record_video = True
     
-    print(color_text(f"✅ 将处理: {url}", Colors.GREEN))
     print(color_text(f"📁 输出到: {output_dir}", Colors.GREEN))
     print(color_text(f"🎥 视频录制: {'开启' if record_video else '关闭'}", Colors.GREEN))
     
     return {
-        'urls': [url],
+        'urls': urls,
         'output_dir': output_dir,
         'record_video': record_video
     }
@@ -363,29 +396,31 @@ def process_url(url, base_output_dir, record_video=True, element_removal_options
                     video_file = video_files[0]
                     print(f"🎬 找到视频文件: {video_file}")
                     
-                    # Get custom prompt or use default
-                    base_video_prompt = (element_removal_options.get('video_prompt') if element_removal_options 
-                                       else "请详细分析这个网站滚动视频，包括：1) 主要内容和布局总结，2) 关键视觉元素和设计模式，3) 用户体验观察。")
-                    
                     # Check if we have extracted webpage text to include in the prompt
                     webpage_text = element_removal_options.get('extracted_text', '') if element_removal_options else ''
                     
                     if webpage_text:
                         print("📄 将网页文本内容加入视频分析提示词")
-                        enhanced_prompt = f"""{base_video_prompt}
+                        # Use DEFAULT_ANALYSIS_PROMPT from video_analysis.py + webpage text
+                        enhanced_prompt = f"""{webpage_text}
 
-以下是从网页中提取的文本内容，请结合此文本信息和视频内容进行分析：
+Describe the layout and scrolling motion for frontend programming section by section, like:
 
-{webpage_text}
-
-请在分析视频时参考上述文本内容，特别关注：
-- 视频中展示的内容与文本内容的对应关系
-- 视觉设计如何支持和呈现文本信息
-- 用户界面布局与文本层次结构的关系
-- 整体用户体验的连贯性"""
+1. Hero:
+   - Layout:
+   - Images:
+   - Scrolling motion:
+...
+x. Footer:
+   - Layout:
+   - Images:
+   - Scrolling motion:
+   
+Note: For each section, please provide specific details about the layout structure, any images or visual elements, and how the page behaves during scrolling (e.g., parallax effects, fade-ins, etc.)."""
                         video_prompt = enhanced_prompt
                     else:
-                        video_prompt = base_video_prompt
+                        # No webpage text, let video_analysis.py use its DEFAULT_ANALYSIS_PROMPT
+                        video_prompt = None
                     
                     # Use external video analysis tool
                     analysis_result = analyze_video_using_external_tool(
@@ -469,12 +504,18 @@ Interactive mode (-i) allows you to choose which elements to remove during proce
             'remove_custom': False,
             'custom_selectors': [],
             'timeout': 30,
-            'delay': 2.0
+            'delay': 2.0,
+            'analyze_video': bool(os.environ.get('GEMINI_API_KEY')),  # Auto-enable if API key exists
+            'video_prompt': "请详细分析这个网站滚动视频，包括：1) 主要内容和布局总结，2) 关键视觉元素和设计模式，3) 用户体验观察。"
         }
         
         print("✅ 使用默认元素移除设置:")
         print("   • 移除Framer元素")
         print("   • 移除常见不需要元素（广告、Cookie横幅等）")
+        if os.environ.get('GEMINI_API_KEY'):
+            print("   • 🎬 视频分析已启用 (Gemini API)")
+        else:
+            print("   • ⚠️  视频分析需要 GEMINI_API_KEY 环境变量")
         print()
         
     else:
@@ -500,7 +541,7 @@ Interactive mode (-i) allows you to choose which elements to remove during proce
             'custom_selectors': [],
             'timeout': args.timeout,
             'delay': args.delay,
-            'analyze_video': args.analyze_video,
+            'analyze_video': args.analyze_video or bool(os.environ.get('GEMINI_API_KEY')),  # Auto-enable if API key exists or explicitly requested
             'video_prompt': args.video_prompt
         }
         

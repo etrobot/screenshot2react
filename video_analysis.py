@@ -14,6 +14,23 @@ import time
 from pathlib import Path
 from typing import Dict, List, Optional
 
+# 默认视频分析提示词
+DEFAULT_ANALYSIS_PROMPT = """
+Describe the layout and scrolling motion for frontend programming section by section, like:
+
+1. Hero:
+   - Layout:
+   - Images:
+   - Scrolling motion:
+...
+x. Footer:
+   - Layout:
+   - Images:
+   - Scrolling motion:
+   - 
+Note: For each section, please provide specific details about the layout structure, any images or visual elements, and how the page behaves during scrolling (e.g., parallax effects, fade-ins, etc.).
+"""
+
 # ANSI 颜色代码
 class Colors:
     RED = '\033[91m'
@@ -34,11 +51,14 @@ def color_text(text: str, color_code: str) -> str:
 
 def analyze_video_with_gemini(
     video_path: str, 
-    prompt: str = "请分析这个视频并提供详细描述。", 
+    prompt: str = None, 
     api_key: Optional[str] = None,
     proxy_url: str = "http://127.0.0.1:7890",
     model: str = "gemini-2.0-flash-exp"
 ) -> Dict:
+    # 使用默认提示词如果未提供
+    if prompt is None:
+        prompt = DEFAULT_ANALYSIS_PROMPT
     """
     使用 Google Gemini API 分析视频文件
     
