@@ -370,12 +370,12 @@ def process_url(url, base_output_dir, record_video=True, element_removal_options
     if element_removal_options and (element_removal_options.get('remove_framer') or element_removal_options.get('remove_common_unwanted')):
         print("🗑️  将移除不需要的元素")
     
-    # Import and use the screenshot capture functionality
-    from screenshot_capture import capture_website_content
+    # Import and use the content capture functionality (no screenshots)
+    from screenshot_capture import capture_website_content_no_screenshot
     
     try:
-        # Capture website content with optional video recording and element removal options
-        success = capture_website_content(url, screenshot_path, record_video=record_video, element_removal_options=element_removal_options)
+        # Capture website content with video recording and element removal options (no screenshots)
+        success = capture_website_content_no_screenshot(url, screenshot_path, record_video=record_video, element_removal_options=element_removal_options)
         if success:
             print(f"✓ Successfully processed {url}")
             
@@ -450,7 +450,7 @@ def main():
     
     # Parse command line arguments
     parser = argparse.ArgumentParser(
-        description='🌐 Process websites with screenshots, video recording, and element removal',
+        description='🌐 Extract information from webpages: video recording, DOM, text, and element removal (NO SCREENSHOTS)',
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:

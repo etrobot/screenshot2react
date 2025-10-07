@@ -54,7 +54,7 @@ def analyze_video_with_gemini(
     prompt: str = None, 
     api_key: Optional[str] = None,
     proxy_url: str = "http://127.0.0.1:7890",
-    model: str = "gemini-2.0-flash-exp"
+    model: str = "gemini-2.5-flash"
 ) -> Dict:
     # 使用默认提示词如果未提供
     if prompt is None:
@@ -260,62 +260,21 @@ def save_analysis_result(analysis_result: Dict, video_path: str, output_file: Op
     try:
         with open(output_file, 'w', encoding='utf-8') as f:
             if format_type == "markdown":
-                # Markdown 格式
-                f.write("# 🎬 视频分析报告\n\n")
-                
-                # 基本信息
-                f.write("## 📋 基本信息\n\n")
-                f.write(f"- **📁 视频文件**: `{os.path.basename(video_path)}`\n")
-                f.write(f"- **📅 分析时间**: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"- **🎯 分析状态**: {'✅ 成功' if analysis_result['success'] else '❌ 失败'}\n\n")
-                
-                # 元数据
-                if 'metadata' in analysis_result and analysis_result['metadata']:
-                    f.write("## 📊 分析元数据\n\n")
-                    f.write("| 项目 | 值 |\n")
-                    f.write("|------|----|\n")
-                    for key, value in analysis_result['metadata'].items():
-                        f.write(f"| {key} | {value} |\n")
-                    f.write("\n")
-                
-                # 分析结果或错误信息
+                # 只输出分析结果内容，没有额外信息
                 if analysis_result['success']:
-                    f.write("## 📝 分析结果\n\n")
                     f.write(analysis_result['content'])
-                    f.write("\n\n")
                 else:
-                    f.write("## ❌ 错误信息\n\n")
-                    f.write("```\n")
-                    f.write(analysis_result['error'])
-                    f.write("\n```\n\n")
-                
-                # 工具信息
-                f.write("---\n\n")
-                f.write("*🔗 生成工具: video_analysis.py*\n")
+                    f.write(f"错误: {analysis_result['error']}")
                 
             else:
-                # 纯文本格式（原有格式）
-                f.write("🎬 视频分析报告\n")
-                f.write("=" * 60 + "\n\n")
-                
-                # 基本信息
-                f.write(f"📁 视频文件: {os.path.basename(video_path)}\n")
-                f.write(f"📅 分析时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
-                f.write(f"🎯 分析状态: {'✅ 成功' if analysis_result['success'] else '❌ 失败'}\n\n")
-                
                 # 元数据
                 if 'metadata' in analysis_result and analysis_result['metadata']:
-                    f.write("📊 分析元数据:\n")
-                    f.write("-" * 30 + "\n")
                     for key, value in analysis_result['metadata'].items():
                         f.write(f"{key}: {value}\n")
                     f.write("\n")
                 
                 # 分析结果或错误信息
                 if analysis_result['success']:
-                    f.write("📝 分析结果:\n")
-                    f.write("-" * 30 + "\n")
-                    f.write(analysis_result['content'])
                     f.write("\n\n")
                 else:
                     f.write("❌ 错误信息:\n")
@@ -369,7 +328,7 @@ def main():
   %(prog)s video.mp4
   %(prog)s video.mp4 -p "分析网站的用户界面设计"
   %(prog)s video_folder/ --batch
-  %(prog)s video.mp4 --model gemini-2.0-flash-exp
+  %(prog)s video.mp4 --model gemini-2.5-flash
   %(prog)s video.mp4 --proxy http://127.0.0.1:7890
 
 环境变量:
@@ -381,10 +340,10 @@ def main():
     
     parser.add_argument('input', help='视频文件路径或包含视频文件的目录')
     parser.add_argument('-p', '--prompt', 
-                       default="请详细分析这个视频，包括：1) 主要内容和布局总结，2) 关键视觉元素和设计模式，3) 用户体验观察。",
-                       help='分析提示词 (默认: 综合分析)')
+                       default=DEFAULT_ANALYSIS_PROMPT,
+                       help='分析提示词 (默认: 前端分段分析)')
     parser.add_argument('-o', '--output', help='输出文件路径 (可选，默认自动生成)')
-    parser.add_argument('--model', default='gemini-2.0-flash-exp',
+    parser.add_argument('--model', default='gemini-2.5-flash',
                        help='Gemini 模型 (默认: %(default)s)')
     parser.add_argument('--proxy', default='http://127.0.0.1:7890',
                        help='代理服务器地址 (默认: %(default)s)')

@@ -133,6 +133,12 @@ def record_scrolling_video_sync(page, video_output_path):
         if total_height > viewport_height * 3:
             print("📏 页面较长，开始录制滚动视频...")
         
+        # Disable smooth scrolling and scroll-snap to prevent micro jitter during capture
+        try:
+            page.add_style_tag(content='html, body { scroll-behavior: auto !important; overscroll-behavior: none !important; } * { scroll-snap-type: none !important; }')
+        except Exception:
+            pass
+        
         # Skip video recording if page is too short
         if total_height <= viewport_height * 1.5:
             print("Page is too short for meaningful video recording, skipping...")
@@ -146,9 +152,7 @@ def record_scrolling_video_sync(page, video_output_path):
             frames = []
             current_scroll = 0
             frame_count = 0
-            
-            # Scroll to top first and take initial frames
-            page.evaluate('() => window.scrollTo(0, 0)')
+
             
             # Wait 3 seconds before starting to allow websites to fully load
             print("⏳ 等待网站加载完成 (3秒)...")
@@ -164,25 +168,52 @@ def record_scrolling_video_sync(page, video_output_path):
             # Calculate scroll step - one viewport height for natural scrolling
             scroll_step = viewport_height - 100  # Slight overlap
             
-            while current_scroll < total_height:
-                # Scroll down one viewport
-                next_scroll = current_scroll + scroll_step
+            # Compute maximum scroll top to avoid bouncing at the bottom
+            max_scroll_top = max(0, int(total_height) - int(viewport_height))
+
+            while current_scroll < max_scroll_top - 2:
+
+                # Use real mouse wheel events for smooth scrolling with smaller, more natural increments
+                wheel_steps = 12  # More steps for smoother scrolling
+                wheel_delta_y = scroll_step / wheel_steps  # Smaller wheel increments
                 
-                # Smooth scroll animation by taking frames during scroll
-                steps = 6  # Number of intermediate steps for smooth scrolling
-                for step in range(steps):
-                    intermediate_scroll = current_scroll + (scroll_step * (step + 1) / steps)
-                    page.evaluate(f'() => window.scrollTo(0, {intermediate_scroll})')
-                    time.sleep(0.1)  # Quick steps for smooth animation
-                    
-                    # Take frame during scroll
-                    frame_path = os.path.join(temp_dir, f"frame_{frame_count:04d}.png")
-                    page.screenshot(path=frame_path)
-                    frames.append(frame_path)
-                    frame_count += 1
+                for step in range(wheel_steps):
+                    # Use real mouse wheel event to trigger wheel-dependent animations
+                    page.mouse.wheel(0, wheel_delta_y)
+                    time.sleep(0.06)  # Slightly shorter delay for smooth motion
+
+                # Wait until scrolling settles (no Y change across a few RAFs)
+                try:
+                    page.evaluate("""
+                        () => new Promise(resolve => {
+                          let last = window.pageYOffset;
+                          let stable = 0;
+                          function tick() {
+                            requestAnimationFrame(() => {
+                              const y = window.pageYOffset;
+                              if (Math.abs(y - last) < 0.5) {
+                                stable++;
+                              } else {
+                                stable = 0;
+                              }
+                              last = y;
+                              if (stable >= 2) resolve(); else tick();
+                            });
+                          }
+                          tick();
+                        })
+                    """)
+                except Exception:
+                    time.sleep(0.12)
+
+                # Take a frame AFTER motion has settled to avoid micro-jitter
+                frame_path = os.path.join(temp_dir, f"frame_{frame_count:04d}.png")
+                page.screenshot(path=frame_path)
+                frames.append(frame_path)
+                frame_count += 1
                 
-                # Update current scroll position
-                actual_scroll = page.evaluate('() => window.pageYOffset')
+                # Update current scroll position (rounded to integer px)
+                actual_scroll = int(page.evaluate('() => Math.round(window.pageYOffset)'))
                 
                 # Break if we can't scroll further
                 if actual_scroll == current_scroll:
@@ -271,14 +302,25 @@ def take_full_page_screenshot_sync(page, output_path, record_video=True):
             else:
                 print("Video recording failed, but continuing with screenshot")
         
-        # Scroll down the page in steps to trigger lazy loading
+        # Scroll down the page in steps to trigger lazy loading using mouse wheel
         current_position = 0
         scroll_step = viewport_height // 2  # Scroll half viewport at a time
         
         while current_position < total_height:
-            page.evaluate(f"window.scrollTo(0, {current_position})")
-            time.sleep(2)  # Wait for content to load
-            current_position += scroll_step
+            # Use mouse wheel for more realistic scrolling that triggers wheel events
+            target_position = min(current_position + scroll_step, total_height)
+            wheel_distance = target_position - current_position
+            
+            # Perform wheel scrolling in smaller, smoother increments
+            wheel_increments = max(1, int(wheel_distance / 50))  # Scroll in ~50px increments for smoother motion
+            increment_size = wheel_distance / wheel_increments
+            
+            for i in range(wheel_increments):
+                page.mouse.wheel(0, increment_size)
+                time.sleep(0.05)  # Faster, smoother wheel events
+            
+            time.sleep(2)  # Wait for content to load after scrolling
+            current_position = target_position
             
             # Update total height in case new content was loaded
             new_total_height = page.evaluate("() => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight)")
@@ -286,8 +328,17 @@ def take_full_page_screenshot_sync(page, output_path, record_video=True):
                 total_height = new_total_height
                 print(f"Page height increased to: {total_height}px")
         
-        # Scroll back to top
-        page.evaluate("window.scrollTo(0, 0)")
+        # Scroll back to top using mouse wheel
+        current_scroll = page.evaluate("() => window.pageYOffset")
+        if current_scroll > 0:
+            # Scroll back to top with smooth wheel events
+            wheel_increments = max(1, int(current_scroll / 80))  # Scroll up in ~80px increments for smoother motion
+            increment_size = current_scroll / wheel_increments
+            
+            for i in range(wheel_increments):
+                page.mouse.wheel(0, -increment_size)  # Negative for scrolling up
+                time.sleep(0.03)  # Even faster for scrolling back up
+        
         time.sleep(1)
         
         # Take the full page screenshot
@@ -339,13 +390,13 @@ def get_main_content_dom(page):
         return None, None
 
 
-def capture_website_content(url, output_path, record_video=True, element_removal_options=None):
+def capture_website_content_no_screenshot(url, output_path, record_video=True, element_removal_options=None):
     """
-    Main function to capture website content including screenshot, DOM, and optional video.
+    Main function to capture website content including DOM, text, and optional video (NO SCREENSHOTS).
     
     Args:
         url (str): The URL to capture
-        output_path (str): Path where the screenshot will be saved
+        output_path (str): Base path for output files (used to generate video and DOM file names)
         record_video (bool): Whether to record scrolling video
         element_removal_options (dict): Options for element removal with timeout and delay
         
@@ -354,7 +405,7 @@ def capture_website_content(url, output_path, record_video=True, element_removal
     """
     with sync_playwright() as p:
         browser = p.chromium.launch(
-            headless=True,  # Use headless mode for better performance and stability
+            headless=False,  
             args=[
                 '--no-sandbox',
                 '--disable-dev-shm-usage',
@@ -363,7 +414,8 @@ def capture_website_content(url, output_path, record_video=True, element_removal
                 '--disable-renderer-backgrounding',
                 '--proxy-server=http://127.0.0.1:7890',  # Use proxy for network access
                 '--disable-web-security',  # Better compatibility
-                '--window-size=1280,960'  # Set consistent window size
+                '--window-size=1280,960',  # Set consistent window size
+                '--force-device-scale-factor=1'  # Set zoom level to 100%
             ]
         )
         page = browser.new_page()
@@ -408,7 +460,7 @@ def capture_website_content(url, output_path, record_video=True, element_removal
             
             # Extract webpage text content for video analysis
             try:
-                from process_screenshots import extract_webpage_text
+                from extract_info_from_webpage import extract_webpage_text
                 extracted_text = extract_webpage_text(page)
                 if extracted_text and element_removal_options is not None:
                     element_removal_options['extracted_text'] = extracted_text
@@ -416,17 +468,17 @@ def capture_website_content(url, output_path, record_video=True, element_removal
             except Exception as e:
                 print(f"⚠️  文本提取过程中出现错误: {e}")
             
-            # Take the screenshot without video recording (already done)
-            print("Taking full page screenshot...")
-            screenshot_success = take_full_page_screenshot_sync(page, output_path, record_video=False)
+            # Process content without taking screenshots
+            print("Processing content without screenshots...")
+            content_success = True
             
-            if screenshot_success:
+            if content_success:
                 # Get main content DOM
                 main_content, selector_used = get_main_content_dom(page)
                 
                 if main_content:
                     # Import here to avoid circular imports
-                    from process_screenshots import convert_css_to_tailwind
+                    from extract_info_from_webpage import convert_css_to_tailwind
                     from bs4 import BeautifulSoup
                     
                     # Save DOM content with inline CSS converted to Tailwind
@@ -460,7 +512,7 @@ def capture_website_content(url, output_path, record_video=True, element_removal
                     print(f"DOM content saved: {dom_output_path}")
                     print(f"Content extracted using selector: {selector_used}")
             
-            return screenshot_success
+            return content_success
             
         except Exception as e:
             print(f"Error processing {url}: {e}")
