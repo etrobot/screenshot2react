@@ -30,7 +30,7 @@ def create_video_from_frames_sync(frames_dir, output_path, frame_count):
         ffmpeg_cmd = [
             'ffmpeg',
             '-y',  # Overwrite output file
-            '-framerate', '6',  # 6 fps for 3x faster viewing (1/3 duration)
+            '-framerate', '12',  # 12 fps for 3x faster viewing (1/3 duration)
             '-i', os.path.join(frames_dir, 'frame_%04d.png'),
             '-c:v', 'libx264',
             '-pix_fmt', 'yuv420p',
