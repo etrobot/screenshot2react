@@ -10,6 +10,7 @@ import subprocess
 import time
 import tempfile
 import shutil
+import random
 from playwright.sync_api import sync_playwright
 
 
@@ -159,7 +160,7 @@ def record_scrolling_video_sync(page, video_output_path):
             time.sleep(3)
             
             # Take multiple frames at the beginning (staying still)
-            for i in range(8):  # 8 frames = 1.33 seconds at 6fps (was 4 seconds at 2fps)
+            for i in range(12):  # ~1s at 12fps
                 frame_path = os.path.join(temp_dir, f"frame_{frame_count:04d}.png")
                 page.screenshot(path=frame_path)
                 frames.append(frame_path)
@@ -171,47 +172,45 @@ def record_scrolling_video_sync(page, video_output_path):
             # Compute maximum scroll top to avoid bouncing at the bottom
             max_scroll_top = max(0, int(total_height) - int(viewport_height))
 
+            # One-time quick wheel tick to trigger wheel-dependent rendering
+            try:
+                page.mouse.wheel(0, 60)
+                time.sleep(0.005)  # 5ms as requested
+            except Exception:
+                pass
+
             while current_scroll < max_scroll_top - 2:
 
-                # Use real mouse wheel events for smooth scrolling with smaller, more natural increments
-                wheel_steps = 12  # More steps for smoother scrolling
-                wheel_delta_y = scroll_step / wheel_steps  # Smaller wheel increments
-                
-                for step in range(wheel_steps):
-                    # Use real mouse wheel event to trigger wheel-dependent animations
-                    page.mouse.wheel(0, wheel_delta_y)
-                    time.sleep(0.06)  # Slightly shorter delay for smooth motion
+                # Compute segment target using viewport step with overlap
+                target_scroll = min(current_scroll + scroll_step, max_scroll_top)
 
-                # Wait until scrolling settles (no Y change across a few RAFs)
-                try:
-                    page.evaluate("""
-                        () => new Promise(resolve => {
-                          let last = window.pageYOffset;
-                          let stable = 0;
-                          function tick() {
-                            requestAnimationFrame(() => {
-                              const y = window.pageYOffset;
-                              if (Math.abs(y - last) < 0.5) {
-                                stable++;
-                              } else {
-                                stable = 0;
-                              }
-                              last = y;
-                              if (stable >= 2) resolve(); else tick();
-                            });
-                          }
-                          tick();
-                        })
-                    """)
-                except Exception:
-                    time.sleep(0.12)
+                # Per-frame eased programmatic progression (record during motion)
+                seg_duration_ms = random.randint(800, 1100)  # ~0.8s-1.1s per segment
+                frame_interval_s = random.uniform(0.07, 0.09)  # 70–90ms between frames
+                frames_in_segment = max(8, int(seg_duration_ms / int(frame_interval_s * 1000)))
 
-                # Take a frame AFTER motion has settled to avoid micro-jitter
-                frame_path = os.path.join(temp_dir, f"frame_{frame_count:04d}.png")
-                page.screenshot(path=frame_path)
-                frames.append(frame_path)
-                frame_count += 1
-                
+                start_y = current_scroll
+                distance = max(0, target_scroll - start_y)
+                if distance <= 0:
+                    break
+
+                for i in range(1, frames_in_segment + 1):
+                    t = i / frames_in_segment
+                    # easeOutCubic
+                    eased = 1 - pow(1 - t, 3)
+                    y = int(round(start_y + distance * eased))
+                    page.evaluate(f'() => window.scrollTo(0, {y})')
+                    # Capture each eased step to include smooth motion in the video
+                    frame_path = os.path.join(temp_dir, f"frame_{frame_count:04d}.png")
+                    page.screenshot(path=frame_path)
+                    frames.append(frame_path)
+                    frame_count += 1
+                    time.sleep(frame_interval_s)
+
+                    # Early stop if we already reached or very close to target
+                    if y >= target_scroll - 1:
+                        break
+
                 # Update current scroll position (rounded to integer px)
                 actual_scroll = int(page.evaluate('() => Math.round(window.pageYOffset)'))
                 
@@ -222,17 +221,17 @@ def record_scrolling_video_sync(page, video_output_path):
                 
                 current_scroll = actual_scroll
                 
-                # Stay still for ~1 second (human reading time at 6fps)
-                pause_frames = 6  # 6 frames = 1 second at 6fps (was 3 seconds at 2fps)
+                # Stay still for ~1 second（段落阅读停顿）
+                pause_frames = 12  # 12 frames ≈ 1 second at 12fps
                 for i in range(pause_frames):
                     frame_path = os.path.join(temp_dir, f"frame_{frame_count:04d}.png")
                     page.screenshot(path=frame_path)
                     frames.append(frame_path)
                     frame_count += 1
                 
-                # Safety limit
-                if frame_count > 300:  # Increased limit for natural scrolling
-                    print("⚠️  达到最大帧数限制 (300)")
+                # Safety limit (allow longer capture at 12fps)
+                if frame_count > 360:
+                    print("⚠️  达到最大帧数限制 (360)")
                     break
                 
                 # Show progress for long scrolling
@@ -255,7 +254,7 @@ def record_scrolling_video_sync(page, video_output_path):
                     record_scrolling_video_sync._first_scroll_shown = True
             
             # Take final frames at the bottom
-            for i in range(8):  # 8 frames = 1.33 seconds at bottom (was 4 seconds at 2fps)
+            for i in range(12):  # ~1s at bottom for 12fps
                 frame_path = os.path.join(temp_dir, f"frame_{frame_count:04d}.png")
                 page.screenshot(path=frame_path)
                 frames.append(frame_path)
